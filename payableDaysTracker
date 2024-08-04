@@ -1,0 +1,218 @@
+//
+function calculatePayableDays() {
+  Logger.log('something');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const payableDaysSheet = ss.getSheetByName('Copy of payable days');
+  const activityTrackerSheet = ss.getSheetByName('activity-tracker');
+
+
+  // Error handling for missing sheets
+  if (!activityTrackerSheet || !payableDaysSheet) {
+    Logger.log('One or more sheets are missing.');
+    return;
+  }
+
+  // special condition for unpaid learning hours
+  const tempConditionDate = new Date('2024-07-13')
+
+  const payableData = payableDaysSheet.getDataRange().getValues();
+  const activityData = activityTrackerSheet.getDataRange().getValues();
+
+  const monthName = payableData[0][0]; // Read month name from A1
+  const monthNumber = getMonthNumber(monthName); // Convert month name to number (1-12)
+
+  const currentYear = new Date().getFullYear()
+  const _1Day = new Date(currentYear, monthNumber, 1)
+
+  // Create a map to store employee data
+  const empDataMap = payableData.slice(2).reduce((acc, row) => {
+    if (typeof row[0] === 'string') { // Check if row[0] is a string
+      const email = row[0].toLowerCase().trim();
+      acc[email] = {
+        paymentType: row[1].toLowerCase().trim(),
+        weekHours: [0, 0, 0, 0, 0], // Hours for each of the four weeks
+        extraDaysHours: 0,
+        totalUnpaidHours: 0,
+        totalStackChangeHour: 0,
+        totalPaidHours: 0,
+        totalPayableDays: 0,
+        weekWorkDay: [{}, {}, {}, {}, {}],
+      };
+    }
+    return acc;
+  }, {});
+
+  // Process activity data
+  for (let i = 1; i < activityData.length; i++) {
+    const row = activityData[i];
+    if (typeof row[1] === 'string') { // Check if row[1] is a string
+      
+      const email = row[1].toLowerCase().trim();
+      const date = new Date(row[0]);
+      const monthInd = date.getMonth();
+
+      // 
+
+      const hours = parseFloat(row[4]); // Worked hour
+      const projectName = row[3];
+      const day = date.getDate();
+
+      const weekIndex = Math.ceil(day / 7); // Determine the week index (1 to 5)
+
+      const isSunday = date.getDay()
+      if (monthInd != monthNumber || !isSunday || ((isSunday == 6) && (weekIndex % 2 == 0))) {
+        //    if(email=="mahendra@navgurukul.org"){
+        //   console.log(isSunday,"asdfasdfasdfasdfasdfasdfasdfasdfasfd",date)
+        // }
+        continue;
+      }
+
+
+      // List of projects with special cases.
+      const projList = [
+        {
+          projectName: "Stack Change",
+          fraction: 1.5,
+          isPaid: true // Corrected from 'True' to 'true'
+        },
+        {
+          projectName: "Learning Unpaid",
+          fraction: 0,  // if 0
+          isPaid: false // Corrected from 'False' to 'false'
+        },
+      ];
+
+
+      const projDetails = projList.reduce((acc, row) => {
+        if (typeof row.projectName === 'string') { // Check if row.projectName is a string
+          const projectName = row.projectName.toLowerCase().trim();  // Project name
+          acc[projectName] = { ...row };
+        }
+        return acc;
+      }, {});
+
+      // Count all data as per activity
+      const counter = (weekInd, email, hours, projName, date) => {
+        // empDataMap[email]
+        if (empDataMap[email]) {
+          const aa = empDataMap[email].weekWorkDay[weekInd - 1]
+          empDataMap[email].weekWorkDay[weekInd - 1] = {
+            ...empDataMap[email].weekWorkDay[weekInd - 1],
+            [date]: aa[date] + 1 || 1
+          }; // Count work days of weeks
+          const edgeCaseProj = Object.keys(projDetails);
+          const projectName = projName.toLowerCase().trim()
+          if (edgeCaseProj.includes(projectName)) {
+            if (projDetails[projectName].isPaid) { // Stack change
+              empDataMap[email].weekHours[weekInd - 1] += hours / projDetails[projectName].fraction;
+              empDataMap[email].totalStackChangeHour += hours;
+            } else {
+              if (date < tempConditionDate) {
+                empDataMap[email].weekHours[weekInd - 1] += hours;
+                empDataMap[email].totalUnpaidHours += hours;
+              } else {
+                empDataMap[email].totalUnpaidHours += hours;
+
+              }
+            }
+          } else {
+            empDataMap[email].weekHours[weekInd - 1] += hours;
+          }
+        }
+        return null;
+      };
+
+      // Call counter to update working days and hours in employee data map
+      counter(weekIndex, email, hours, projectName, date);
+
+    }
+  }
+
+  const allEmails = Object.keys(empDataMap)
+  for (let i = 0; i < allEmails.length; i++) {
+    
+    const email = allEmails[i];
+    const row = empDataMap[email]
+     
+
+    for (let j = 0; j < row?.weekWorkDay.length; j++) {
+      if(row.paymentType=="hour"){
+        continue
+      }
+      const empWorkHour = row.weekHours[j]
+      const aassd = Object.keys(row.weekWorkDay[j])
+      const empWorkdays = aassd.length
+      const compWorkdays = workingDaysByWeek(j + 1, _1Day)
+      // const empLeaveOfWeek = compWorkdays - empWorkdays
+      const result = empWorkdays ? empWorkHour / empWorkdays : 0 // avg of workhour/workdays in week
+      if (result <= 6) {
+        const actualWorkDay=empWorkHour/6
+        empDataMap[email]["totalPayableDays"] += actualWorkDay
+      }
+      else {
+        empDataMap[email]["totalPayableDays"] += empWorkdays
+      }
+
+
+    if (email == "kirithiv@navgurukul.org") {
+       console.log(empDataMap[email])
+      }
+
+    }
+  }
+
+
+  // we need actual js date
+  function workingDaysByWeek(weekInd, date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const totalMonthDays = new Date(year, month + 1, 0).getDate();
+    if (weekInd > 4) { // for extra days
+      const fifthWeeksDays = totalMonthDays - 28
+      if (fifthWeeksDays) {
+        for (let i = 1; i <= fifthWeeksDays; i++) {
+          const lastdate = `${year}-${month}-${28 + i}`
+          const newdate = new Date(lastdate)
+          const lastday = newdate.getDay()
+          if (!lastday) {
+            return fifthWeeksDays - 1
+          }
+        }
+        return fifthWeeksDays
+      }
+    }
+    else {
+      return weekInd / 2 == 0 ? 5 : 6
+    }
+  }
+
+  Object.keys(empDataMap).forEach((email, index) => {
+    const row = index + 3; // skip 2 rows
+    const lowerCaseEmail = email.toLowerCase().trim();
+
+    const paymentType = empDataMap[lowerCaseEmail].paymentType;
+    if(paymentType == 'day') {
+      payableDaysSheet.getRange(`J${row}`).setValue((empDataMap[lowerCaseEmail].totalPayableDays).toFixed(2));
+    } else if (paymentType == 'hour') {
+    const totalHour=empDataMap[lowerCaseEmail].weekHours.reduce((acc,item)=>acc+item)
+      payableDaysSheet.getRange(`K${row}`).setValue(totalHour.toFixed(2));
+    }
+
+    payableDaysSheet.getRange(`C${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[0]).toFixed(2));
+    payableDaysSheet.getRange(`D${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[1]).toFixed(2));
+    payableDaysSheet.getRange(`E${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[2]).toFixed(2));
+    payableDaysSheet.getRange(`F${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[3]).toFixed(2));
+    payableDaysSheet.getRange(`G${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[4]).toFixed(2));
+    payableDaysSheet.getRange(`H${row}`).setValue((empDataMap[lowerCaseEmail].totalUnpaidHours).toFixed(2));
+    payableDaysSheet.getRange(`I${row}`).setValue((empDataMap[lowerCaseEmail].totalStackChangeHour).toFixed(2));
+    // payableDaysSheet.getRange(`J${row}`).setValue((empDataMap[lowerCaseEmail].totalPayableDays).toFixed(2)); // New column for payable days
+  });
+
+  // Additional logic for calculating total payable days can go here
+}
+
+// Convert month name to month number (1-12)
+function getMonthNumber(monthName) {
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  return months.indexOf(monthName);
+}
