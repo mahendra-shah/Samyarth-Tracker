@@ -13,7 +13,8 @@ function calculatePayableDays() {
   }
 
   // special condition for unpaid learning hours in july month
-  const tempConditionDate = new Date('2024-07-13')
+  let tempConditionDate = 0;
+  tempConditionDate = new Date('2024-07-13')
 
 
   const payableData = payableDaysSheet.getDataRange().getValues();
@@ -28,42 +29,42 @@ function calculatePayableDays() {
 
   // Create a map to store employee data
   const leavesDataMap = leavesData.slice(1).reduce((acc, row) => {
-  if (typeof row[0] === 'string') { // Check if row[0] is a string
-    const email = row[0].toLowerCase().trim();
-    // if (!acc[email]) {
-    //   acc[email] = []; // Initialize array if it doesn't exist
-    // }
-    // acc[email].push(row[3]); // Push the leave data into the array
+    if (typeof row[0] === 'string') { // Check if row[0] is a string
+      const email = row[0].toLowerCase().trim();
+      if (!acc[email]) {
+        acc[email] = 0; // Initialize array if it doesn't exist
+      }
+      /* calculate totalhalfDayLeave by checking the leave entry is integer or float , float ref to a half day and interger refer to full day leave
+       Push the leave data into the array but only half leave days 
+       {
+          "john@example.com": 1.0,  // 0.5 (for 0.5 day) + 0.5 (for 2.5 day as 0.5 is counted) 
+          "jane@example.com": 1.5   // 0.5 (for first 0.5 day) + 0.5 (for 1.5 day) + 0.5 (for second 0.5 day)
+        }
+      */
+      acc[email] += !Number.isInteger(row[3]) ? 0.5 : 0;
 
-    if (!acc[email]) {
-      acc[email] = 0; // Initialize array if it doesn't exist
+
     }
-    acc[email]+=!Number.isInteger(row[3])?0.5:0; // Push the leave data into the array
-
-
-  }
-  return acc;
-}, {});
-// calculate tatalhalfDayLeave by checking the leave entry is integer or float , float ref to a half day and interger refer to full day leave
+    return acc;
+  }, {});
   // const totalHalfLeave=(leavesDataMap["dhanshri@navgurukul.org"].filter((data)=>!Number.isInteger(data))).length
   // console.log(totalHalfLeave*0.5)
-  console.log(leavesDataMap)
+  // console.log(leavesDataMap)
 
   // return
 
-  // Create a map to store employee data
+  // Create a map to store employee data in this format {emailasKey:{}, .....}
   const empDataMap = payableData.slice(2).reduce((acc, row) => {
     if (typeof row[0] === 'string') { // Check if row[0] is a string
       const email = row[0].toLowerCase().trim();
       acc[email] = {
         paymentType: row[1].toLowerCase().trim(),
-        weekHours: [0, 0, 0, 0, 0], // Hours for each of the four weeks
-        extraDaysHours: 0,
-        totalUnpaidHours: 0,
-        totalStackChangeHour: 0,
-        totalPaidHours: 0,
-        totalPayableDays: 0,
-        weekWorkDay: [{}, {}, {}, {}, {}],
+        weekHours: [0, 0, 0, 0, 0], // Hours for each of the four weeks last index is for any extra days if month / 7
+        extraDaysHours: 0, // for also track extra days hours will come here
+        totalUnpaidHours: 0, // total unpaid hours without any condition will come here
+        totalStackChangeHour: 0, // Stack change hour project will come here.
+        totalPayableDays: 0,  // total paid hours will come here after passing through all conditions
+        weekWorkDay: [{}, {}, {}, {}, {}],  // weekly worked day will come here extra days hours in last index
       };
     }
     return acc;
@@ -76,13 +77,10 @@ function calculatePayableDays() {
 
       const email = row[1].toLowerCase().trim();
       const date = new Date(row[0]);
-      const monthInd = date.getMonth();
-
-      // 
-
+      const monthInd = date.getMonth(); // month index ( 0 - 11 )
+      const day = date.getDate();
       const hours = parseFloat(row[4]); // Worked hour
       const projectName = row[3];
-      const day = date.getDate();
 
       const weekIndex = Math.ceil(day / 7); // Determine the week index (1 to 5)
 
@@ -95,22 +93,14 @@ function calculatePayableDays() {
         continue;
       }
 
-      // List of projects with special cases.
-      const projList = [
-        {
-          projectName: "Stack Change",
-          fraction: 1.5,
-          isPaid: true
-        },
-        {
-          projectName: "Learning Unpaid",
-          fraction: 0,
-          isPaid: false
-        },
+      // List of projects with special cases 
+      const specialProjects = [
+        { projectName: "Stack Change", fraction: 1.5, isPaid: true },
+        { projectName: "Learning Unpaid", fraction: 0, isPaid: false },
       ];
 
-
-      const projDetails = projList.reduce((acc, row) => {
+      // creating object of special projects {projectNameAsKey:{}, ....}
+      const projDetails = specialProjects.reduce((acc, row) => {
         if (typeof row.projectName === 'string') { // Check if row.projectName is a string
           const projectName = row.projectName.toLowerCase().trim();  // Project name
           acc[projectName] = { ...row };
@@ -118,31 +108,42 @@ function calculatePayableDays() {
         return acc;
       }, {});
 
-      // Count all data as per activity
+      /* This `counter` function is used to process activity data for each employee. It takes in parameters such as `weekInd`
+        (week index), `email`, `hours`, `projName` (project name), and `date`. should only 
+      */
       const counter = (weekInd, email, hours, projName, date) => {
-        // empDataMap[email]
+        // checking for email exists or not
         if (empDataMap[email]) {
-          const aa = empDataMap[email].weekWorkDay[weekInd - 1]
+          // get current week work hours (paid)
+          const currentWeekHours = empDataMap[email].weekWorkDay[weekInd - 1]
+
+          // update work days of weeks
           empDataMap[email].weekWorkDay[weekInd - 1] = {
             ...empDataMap[email].weekWorkDay[weekInd - 1],
-            [date]: aa[date] + 1 || 1
+            [date]: currentWeekHours[date] + 1 || 1 //// Increment the count of work days for the given date
           }; // Count work days of weeks
+
+          // Get the list of project names with special conditions
           const edgeCaseProj = Object.keys(projDetails);
           const projectName = projName.toLowerCase().trim()
+
+          // Check if the project name is in the list of special projects
           if (edgeCaseProj.includes(projectName)) {
-            if (projDetails[projectName].isPaid) { // Stack change
-              empDataMap[email].weekHours[weekInd - 1] += hours / projDetails[projectName].fraction;
-              empDataMap[email].totalStackChangeHour += hours;
-            } else {
-              if (tempConditionDate ? date < tempConditionDate : 0) {
+            // Handle stack change projects (isPaid is true)
+            if (projDetails[projectName].isPaid) {
+              empDataMap[email].weekHours[weekInd - 1] += hours / projDetails[projectName].fraction;  // updating the weekHours given index value
+              empDataMap[email].totalStackChangeHour += hours;  // also keeping record of stack change indivisually for report
+
+            } else { // Handle unpaid learning hours (isPaid is false) with temporary condition for july month
+              if (tempConditionDate ? date < tempConditionDate : 0) { 
                 empDataMap[email].weekHours[weekInd - 1] += hours;
                 empDataMap[email].totalUnpaidHours += hours;
               } else {
                 empDataMap[email].totalUnpaidHours += hours;
-
               }
             }
           } else {
+            // If project is not in the special list, simply add the hours worked
             empDataMap[email].weekHours[weekInd - 1] += hours;
           }
         }
@@ -155,67 +156,45 @@ function calculatePayableDays() {
     }
   }
 
+  // Get all employee emails from the empDataMap
   const allEmails = Object.keys(empDataMap)
   for (let i = 0; i < allEmails.length; i++) {
 
     const email = allEmails[i];
     const row = empDataMap[email]
 
-
+    // Iterate over each week's work day data for the employee
     for (let j = 0; j < row?.weekWorkDay.length; j++) {
+      // If the employee's payment type is "hour", skip the current iteration no need to calculate payable days for them
       if (row.paymentType == "hour") {
         continue
       }
+
+      // Get the total worked hours for the current week
       const empWorkHour = row.weekHours[j]
-      const aassd = Object.keys(row.weekWorkDay[j])
-      const empWorkdays = aassd.length
+      // Calculate the average worked hours per workday for the current week
+      const empWorkdays = Object.keys(row.weekWorkDay[j]).length
+
       // const compWorkdays = workingDaysByWeek(j + 1, _1Day)
       // const empLeaveOfWeek = compWorkdays - empWorkdays
+
+      // Calculate the average worked hours per workday for the current week
       const result = empWorkdays ? empWorkHour / empWorkdays : 0 // avg of workhour/workdays in week
-      if (result <= 6) {
+
+      // If the average worked hours per workday is less than or equal to 6,
+      // calculate the actual payable workdays based on a 6-hour workday
+      if (result < 6) {
         const actualWorkDay = empWorkHour / 6
         empDataMap[email]["totalPayableDays"] += actualWorkDay
       }
       else {
+        // If the average worked hours per workday is more than 6,
+        // add the number of workdays to the total payable days
         empDataMap[email]["totalPayableDays"] += empWorkdays
-      }
-
-
-      if (email == "kirithiv@navgurukul.org") {
-        console.log(empDataMap[email])
       }
 
     }
   }
-
-
-  /* 
-    new Date and week index needed to calculate the total working per week based on date provided.
-    this function also helps get days after 28 days if its there 
-  */
-  // function workingDaysByWeek(weekInd, date) {
-  //   const year = date.getFullYear();
-  //   const month = date.getMonth();
-  //   const totalMonthDays = new Date(year, month + 1, 0).getDate();
-  //   if (weekInd > 4) { // for extra days
-  //     const fifthWeeksDays = totalMonthDays - 28
-  //     if (fifthWeeksDays) {
-  //       for (let i = 1; i <= fifthWeeksDays; i++) {
-  //         const lastdate = `${year}-${month}-${28 + i}`
-  //         const newdate = new Date(lastdate)
-  //         const lastday = newdate.getDay()
-  //         if (!lastday) {
-  //           return fifthWeeksDays - 1
-  //         }
-  //       }
-  //       return fifthWeeksDays
-  //     }
-  //   }
-  //   else {
-  //     return weekInd / 2 == 0 ? 5 : 6
-  //   }
-  // }
-
 
   // Updating the output sheet according to paymentType of employee.
   Object.keys(empDataMap).forEach((email, index) => {
@@ -224,7 +203,7 @@ function calculatePayableDays() {
 
     const paymentType = empDataMap[lowerCaseEmail].paymentType;
     if (paymentType == 'day') { // updating the payable days column (J)
-      payableDaysSheet.getRange(`J${row}`).setValue((empDataMap[lowerCaseEmail].totalPayableDays - (leavesDataMap[lowerCaseEmail]||0)).toFixed(2));
+      payableDaysSheet.getRange(`J${row}`).setValue((empDataMap[lowerCaseEmail].totalPayableDays - (leavesDataMap[lowerCaseEmail] || 0)).toFixed(2));
     } else if (paymentType == 'hour') { // updating the payable days column (K)
       const totalHour = empDataMap[lowerCaseEmail].weekHours.reduce((acc, item) => acc + item)
       payableDaysSheet.getRange(`K${row}`).setValue(totalHour.toFixed(2));
@@ -243,8 +222,36 @@ function calculatePayableDays() {
 
 }
 
-// Convert month name to month number (1-12)
+// Convert month name to month number (0-11)
 function getMonthNumber(monthName) {
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   return months.indexOf(monthName);
 }
+
+/* 
+    new Date and week index needed to calculate the total working per week based on date provided.
+    this function also helps get days after 28 days if its there 
+*/
+// function workingDaysByWeek(weekInd, date) {
+//   const year = date.getFullYear();
+//   const month = date.getMonth();
+//   const totalMonthDays = new Date(year, month + 1, 0).getDate();
+//   if (weekInd > 4) { // for extra days
+//     const fifthWeeksDays = totalMonthDays - 28
+//     if (fifthWeeksDays) {
+//       for (let i = 1; i <= fifthWeeksDays; i++) {
+//         const lastdate = `${year}-${month}-${28 + i}`
+//         const newdate = new Date(lastdate)
+//         const lastday = newdate.getDay()
+//         if (!lastday) {
+//           return fifthWeeksDays - 1
+//         }
+//       }
+//       return fifthWeeksDays
+//     }
+//   }
+//   else {
+//     return weekInd / 2 == 0 ? 5 : 6
+//   }
+// }
+
