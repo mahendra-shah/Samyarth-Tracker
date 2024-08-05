@@ -2,9 +2,9 @@
 function calculatePayableDays() {
   Logger.log('something');
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const payableDaysSheet = ss.getSheetByName('Copy of payable days');
-  const activityTrackerSheet = ss.getSheetByName('activity-tracker');
-
+  const payableDaysSheet = ss.getSheetByName('payableDaysOfMonth_');  // Output sheet
+  const activityTrackerSheet = ss.getSheetByName('activity-tracker'); // activity data source sheet
+  const leaveTrackerSheet = ss.getSheetByName('Leaves-Tracker'); // activity data source sheet
 
   // Error handling for missing sheets
   if (!activityTrackerSheet || !payableDaysSheet) {
@@ -12,17 +12,44 @@ function calculatePayableDays() {
     return;
   }
 
-  // special condition for unpaid learning hours
+  // special condition for unpaid learning hours in july month
   const tempConditionDate = new Date('2024-07-13')
+
 
   const payableData = payableDaysSheet.getDataRange().getValues();
   const activityData = activityTrackerSheet.getDataRange().getValues();
+  const leavesData = leaveTrackerSheet.getDataRange().getValues();
 
   const monthName = payableData[0][0]; // Read month name from A1
   const monthNumber = getMonthNumber(monthName); // Convert month name to number (1-12)
 
   const currentYear = new Date().getFullYear()
   const _1Day = new Date(currentYear, monthNumber, 1)
+
+  // Create a map to store employee data
+  const leavesDataMap = leavesData.slice(1).reduce((acc, row) => {
+  if (typeof row[0] === 'string') { // Check if row[0] is a string
+    const email = row[0].toLowerCase().trim();
+    // if (!acc[email]) {
+    //   acc[email] = []; // Initialize array if it doesn't exist
+    // }
+    // acc[email].push(row[3]); // Push the leave data into the array
+
+    if (!acc[email]) {
+      acc[email] = 0; // Initialize array if it doesn't exist
+    }
+    acc[email]+=!Number.isInteger(row[3])?0.5:0; // Push the leave data into the array
+
+
+  }
+  return acc;
+}, {});
+// calculate tatalhalfDayLeave by checking the leave entry is integer or float , float ref to a half day and interger refer to full day leave
+  // const totalHalfLeave=(leavesDataMap["dhanshri@navgurukul.org"].filter((data)=>!Number.isInteger(data))).length
+  // console.log(totalHalfLeave*0.5)
+  console.log(leavesDataMap)
+
+  // return
 
   // Create a map to store employee data
   const empDataMap = payableData.slice(2).reduce((acc, row) => {
@@ -46,7 +73,7 @@ function calculatePayableDays() {
   for (let i = 1; i < activityData.length; i++) {
     const row = activityData[i];
     if (typeof row[1] === 'string') { // Check if row[1] is a string
-      
+
       const email = row[1].toLowerCase().trim();
       const date = new Date(row[0]);
       const monthInd = date.getMonth();
@@ -60,6 +87,7 @@ function calculatePayableDays() {
       const weekIndex = Math.ceil(day / 7); // Determine the week index (1 to 5)
 
       const isSunday = date.getDay()
+      // ristricting data count for selected month only and excluding week offs
       if (monthInd != monthNumber || !isSunday || ((isSunday == 6) && (weekIndex % 2 == 0))) {
         //    if(email=="mahendra@navgurukul.org"){
         //   console.log(isSunday,"asdfasdfasdfasdfasdfasdfasdfasdfasfd",date)
@@ -67,18 +95,17 @@ function calculatePayableDays() {
         continue;
       }
 
-
       // List of projects with special cases.
       const projList = [
         {
           projectName: "Stack Change",
           fraction: 1.5,
-          isPaid: true // Corrected from 'True' to 'true'
+          isPaid: true
         },
         {
           projectName: "Learning Unpaid",
-          fraction: 0,  // if 0
-          isPaid: false // Corrected from 'False' to 'false'
+          fraction: 0,
+          isPaid: false
         },
       ];
 
@@ -107,7 +134,7 @@ function calculatePayableDays() {
               empDataMap[email].weekHours[weekInd - 1] += hours / projDetails[projectName].fraction;
               empDataMap[email].totalStackChangeHour += hours;
             } else {
-              if (date < tempConditionDate) {
+              if (tempConditionDate ? date < tempConditionDate : 0) {
                 empDataMap[email].weekHours[weekInd - 1] += hours;
                 empDataMap[email].totalUnpaidHours += hours;
               } else {
@@ -130,23 +157,23 @@ function calculatePayableDays() {
 
   const allEmails = Object.keys(empDataMap)
   for (let i = 0; i < allEmails.length; i++) {
-    
+
     const email = allEmails[i];
     const row = empDataMap[email]
-     
+
 
     for (let j = 0; j < row?.weekWorkDay.length; j++) {
-      if(row.paymentType=="hour"){
+      if (row.paymentType == "hour") {
         continue
       }
       const empWorkHour = row.weekHours[j]
       const aassd = Object.keys(row.weekWorkDay[j])
       const empWorkdays = aassd.length
-      const compWorkdays = workingDaysByWeek(j + 1, _1Day)
+      // const compWorkdays = workingDaysByWeek(j + 1, _1Day)
       // const empLeaveOfWeek = compWorkdays - empWorkdays
       const result = empWorkdays ? empWorkHour / empWorkdays : 0 // avg of workhour/workdays in week
       if (result <= 6) {
-        const actualWorkDay=empWorkHour/6
+        const actualWorkDay = empWorkHour / 6
         empDataMap[email]["totalPayableDays"] += actualWorkDay
       }
       else {
@@ -154,50 +181,56 @@ function calculatePayableDays() {
       }
 
 
-    if (email == "kirithiv@navgurukul.org") {
-       console.log(empDataMap[email])
+      if (email == "kirithiv@navgurukul.org") {
+        console.log(empDataMap[email])
       }
 
     }
   }
 
 
-  // we need actual js date
-  function workingDaysByWeek(weekInd, date) {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const totalMonthDays = new Date(year, month + 1, 0).getDate();
-    if (weekInd > 4) { // for extra days
-      const fifthWeeksDays = totalMonthDays - 28
-      if (fifthWeeksDays) {
-        for (let i = 1; i <= fifthWeeksDays; i++) {
-          const lastdate = `${year}-${month}-${28 + i}`
-          const newdate = new Date(lastdate)
-          const lastday = newdate.getDay()
-          if (!lastday) {
-            return fifthWeeksDays - 1
-          }
-        }
-        return fifthWeeksDays
-      }
-    }
-    else {
-      return weekInd / 2 == 0 ? 5 : 6
-    }
-  }
+  /* 
+    new Date and week index needed to calculate the total working per week based on date provided.
+    this function also helps get days after 28 days if its there 
+  */
+  // function workingDaysByWeek(weekInd, date) {
+  //   const year = date.getFullYear();
+  //   const month = date.getMonth();
+  //   const totalMonthDays = new Date(year, month + 1, 0).getDate();
+  //   if (weekInd > 4) { // for extra days
+  //     const fifthWeeksDays = totalMonthDays - 28
+  //     if (fifthWeeksDays) {
+  //       for (let i = 1; i <= fifthWeeksDays; i++) {
+  //         const lastdate = `${year}-${month}-${28 + i}`
+  //         const newdate = new Date(lastdate)
+  //         const lastday = newdate.getDay()
+  //         if (!lastday) {
+  //           return fifthWeeksDays - 1
+  //         }
+  //       }
+  //       return fifthWeeksDays
+  //     }
+  //   }
+  //   else {
+  //     return weekInd / 2 == 0 ? 5 : 6
+  //   }
+  // }
 
+
+  // Updating the output sheet according to paymentType of employee.
   Object.keys(empDataMap).forEach((email, index) => {
-    const row = index + 3; // skip 2 rows
+    const row = index + 3; // skipping 2 rows ( headings )
     const lowerCaseEmail = email.toLowerCase().trim();
 
     const paymentType = empDataMap[lowerCaseEmail].paymentType;
-    if(paymentType == 'day') {
-      payableDaysSheet.getRange(`J${row}`).setValue((empDataMap[lowerCaseEmail].totalPayableDays).toFixed(2));
-    } else if (paymentType == 'hour') {
-    const totalHour=empDataMap[lowerCaseEmail].weekHours.reduce((acc,item)=>acc+item)
+    if (paymentType == 'day') { // updating the payable days column (J)
+      payableDaysSheet.getRange(`J${row}`).setValue((empDataMap[lowerCaseEmail].totalPayableDays - (leavesDataMap[lowerCaseEmail]||0)).toFixed(2));
+    } else if (paymentType == 'hour') { // updating the payable days column (K)
+      const totalHour = empDataMap[lowerCaseEmail].weekHours.reduce((acc, item) => acc + item)
       payableDaysSheet.getRange(`K${row}`).setValue(totalHour.toFixed(2));
     }
 
+    // updating week wise, unpaid hours and stack change hours data their columns
     payableDaysSheet.getRange(`C${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[0]).toFixed(2));
     payableDaysSheet.getRange(`D${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[1]).toFixed(2));
     payableDaysSheet.getRange(`E${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[2]).toFixed(2));
@@ -205,10 +238,9 @@ function calculatePayableDays() {
     payableDaysSheet.getRange(`G${row}`).setValue((empDataMap[lowerCaseEmail].weekHours[4]).toFixed(2));
     payableDaysSheet.getRange(`H${row}`).setValue((empDataMap[lowerCaseEmail].totalUnpaidHours).toFixed(2));
     payableDaysSheet.getRange(`I${row}`).setValue((empDataMap[lowerCaseEmail].totalStackChangeHour).toFixed(2));
-    // payableDaysSheet.getRange(`J${row}`).setValue((empDataMap[lowerCaseEmail].totalPayableDays).toFixed(2)); // New column for payable days
+    // payableDaysSheet.getRange(`J${row}`).setValue((empDataMap[lowerCaseEmail].totalPayableDays).toFixed(2));
   });
 
-  // Additional logic for calculating total payable days can go here
 }
 
 // Convert month name to month number (1-12)
